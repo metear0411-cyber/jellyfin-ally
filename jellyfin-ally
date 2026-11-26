@@ -1,0 +1,35 @@
+#!/bin/bash
+# Launcher for Jellyfin Desktop on ROG Ally game mode.
+# Every launch makes sure the two fixes are in place, so a reinstall or a
+# fresh profile never loses them:
+#   1. the flatpak may read input devices (otherwise SDL sees 0 joysticks)
+#   2. a button map for Steam's virtual "Microsoft X-Box 360 pad" exists
+#      in every Jellyfin profile (otherwise every press is "No match")
+APP=org.jellyfin.JellyfinDesktop
+MAP_SRC="$HOME/.local/share/jellyfin-ally/rog-ally-steam-pad.json"
+BASE="$HOME/.var/app/$APP/data/jellyfin-desktop"
+
+# 1. input device permission (user override, idempotent)
+if ! flatpak override --user --show "$APP" 2>/dev/null | grep -q -E 'devices=.*(input|all)'; then
+    flatpak override --user --device=input "$APP" 2>/dev/null \
+        || flatpak override --user --device=all "$APP"
+fi
+
+# 2. button map; on the very first run create the default profile ourselves
+#    so the map is already there when the app loads input maps at startup
+if [[ -f "$MAP_SRC" ]]; then
+    if [[ ! -f "$BASE/profiles.json" ]]; then
+        id=$(tr -d '-' </proc/sys/kernel/random/uuid)
+        mkdir -p "$BASE/profiles/$id"
+        printf '{\n    "defaultProfile": "%s"\n}\n' "$id" >"$BASE/profiles.json"
+        printf '{\n    "name": "Default"\n}\n' >"$BASE/profiles/$id/profile.json"
+    fi
+    for d in "$BASE"/profiles/*/; do
+        [[ -d "$d" ]] || continue
+        mkdir -p "$d/inputmaps"
+        cmp -s "$MAP_SRC" "$d/inputmaps/rog-ally-steam-pad.json" \
+            || cp -f "$MAP_SRC" "$d/inputmaps/rog-ally-steam-pad.json"
+    done
+fi
+
+exec flatpak run --branch=stable --arch=x86_64 --command=jellyfin-desktop "$APP" --fullscreen --tv "$@"
